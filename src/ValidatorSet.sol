@@ -5,15 +5,21 @@ pragma solidity 0.8.19;
 import "./IValidatorSet.sol";
 
 
-// TODO needs to be upgradeable
+/**
+ * @dev This contract is not upgradeable. The approach to upgrade would be to deploy another 
+ *      contract, set-up the stakes on that contract, and have the validator blockchain and the prover
+ *      hard fork at a particular block to use the new contract address.
+ */
 contract ValidatorSet is IValidatorSet {
     struct ValidatorInfo {
-        // The amount of stake this validator has.
-        uint256 stake;
         // Used for operating the consensus protocol.
+        // Note that this address is used for signature verification of the signatures in the block header.
+        // To make it easier for the prover to locate this storage location, it should be first in the data structure.
         address nodeAccount;
         // Used for adding and removing stake.
         address stakingAccount;
+        // The amount of stake this validator has.
+        uint256 stake;
         // Block number of last block produced by this validator.
         uint256 lastTimeBlockProducer;
     }
@@ -21,8 +27,10 @@ contract ValidatorSet is IValidatorSet {
 
     error ValidatorNodeAlreadyAdded(uint256 _validatorIdOfNodeAccount);
     error StakerForOtherValidator(uint256 _validatorIdOfStakingAccount);
-    error StakerNotConfigured(uint256 _stakerId);
+    error ValidatorNotConfigured(uint256 _stakerId);
     error BlockRewardAlreadyPaid(uint256 _blockNumber);
+    error UnknownSlashingReason(address _validatorIdToSlash, uint256 _reason);
+
 
 
     uint256 public constant BLOCK_REWARD = 100;
@@ -59,7 +67,7 @@ contract ValidatorSet is IValidatorSet {
 
 
     // TODO only validator controller
-    function addValidator(ValidatorInfo calldata _initialInfo) external returns (uint256) {
+    function addValidator(address _nodeAccount, address _stakingAccount, uint256 stake) external returns (uint256) {
         uint256 validatorIdOfNodeAccount = validatorSetByNodeAccount[_initialInfo.nodeAccount];
         if (validatorIdOfNodeAccount != 0) {
             revert ValidatorNodeAlreadyAdded(validatorIdOfNodeAccount);
@@ -70,7 +78,11 @@ contract ValidatorSet is IValidatorSet {
         }
 
         uint256 oldNextNewValidatorId = nextNewValidatorId++;
-        validatorSet[oldNextNewValidatorId] = _initialInfo;
+        ValidatorInfo storage valInfo = validatorSet[oldNextNewValidatorId];
+        valInfo.nodeAccount = _nodeAccount;
+        valInfo.stakingAccount = _stakingAccount;
+        valInfo.stake = _stake;
+        valInfo.lastTimeBlockProducer = block.number;
         validatorSetByNodeAccount[_initialInfo.nodeAccount] = oldNextNewValidatorId;
         validatorSetByStakingAccount[_initialInfo.stakingAccount] = oldNextNewValidatorId;
         totalStake += _initialInfo.stake;
@@ -78,20 +90,25 @@ contract ValidatorSet is IValidatorSet {
 
 
     // TODO only validator controller
-    function depositStake(uint256 _stakerId, uint256 _newStake) external {
+    function stake(uint256 _stakerId, uint256 _newStake) external {
         if (validatorSet[_stakerId].stakerAccount == address(0)) {
-            revert StakerNotConfigured(_stakerId);
+            revert ValidatorNotConfigured(_stakerId);
         }
         validatorSet[_stakerId].stake += _newStake;
         totalStake += _newStake;
     }
 
     // TODO only staker account
-    function withdrawStake() external {
-        // if (validators[_stakerId].staking == 0) {
-        //     revert StakerNotConfigured(_stakerId);
-        // }
+    function requestUnstake() external {
+        // TODO allow up to the amount currently staked and not in the withdrawal queue to be unstaked.
+        // TODO stake can still be slashed at this point. Validator still needs to operate node.
 
+    }
+
+    // TODO how does this work when withdrawal period has passed. Don't want to allow instant unstake.
+
+    function withdrawalStake() external {
+        // Allow unstaked stake that has been in the withdrawal queue to be withdrawn.
     }
 
 
@@ -102,8 +119,10 @@ contract ValidatorSet is IValidatorSet {
                 _slash(_validatorIdToSlash, amount);
                 // Update when the validator produced its more recent block so it can't be slashed twice in one day.
                 validatorSet[_validatorIdToSlash].lastTimeBlockProducer = block.number;
-
             }
+        }
+        else {
+            revert UnknownSlashingReason(_validatorIdToSlash, _reason);
         }
 
     }
@@ -136,17 +155,23 @@ contract ValidatorSet is IValidatorSet {
 
 
 
-    function getValidators() override external view returns (address[] memory) {
+    function getValidators() override external view returns (Validator[] memory) {
+        uint256 numActiveValidators = 
         return validators;
+    }
+
+    function getWithdrawableStake(address _staker) external view returns (uint256) {
+
     }
 
 
     function _slash(uint256 _validatorId, uint256 _amount) private {
+        // TODO communicate with controller
 
     }
 
     function _decreaseStake(uint256 _validatorId, uint256 _amount) private {
-
+        // TODO communicate with controller
     }
 
 }
